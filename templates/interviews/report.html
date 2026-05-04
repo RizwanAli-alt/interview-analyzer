@@ -1,0 +1,272 @@
+{% extends 'base.html' %}
+{% block title %}Analysis Report — InterviewAI{% endblock %}
+
+{% block extra_css %}
+<style>
+  .score-bar { height: 10px; border-radius: 6px; }
+  .feedback-item { border-left: 3px solid #e5e7eb; padding: .5rem 1rem; margin-bottom: .5rem; }
+  .feedback-item.weak { border-color: #ef4444; background: #fff5f5; }
+  .feedback-item.suggest { border-color: #22c55e; background: #f0fdf4; }
+  .answer-block { background: #f8f9ff; border-radius: 10px; padding: 1.2rem; margin-bottom: 1rem; }
+  .badge-score { font-size: .85rem; padding: .4rem .8rem; border-radius: 8px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if session.status == 'analyzing' %}
+<!-- ── Waiting state ─────────────────────────────────────────────────────── -->
+<div class="row justify-content-center">
+  <div class="col-md-6 text-center py-5">
+    <div class="spinner-border text-primary mb-4" style="width:3.5rem;height:3.5rem"></div>
+    <h4 class="fw-bold">Analyzing Your Interview</h4>
+    <p class="text-muted">Transcribing audio, grading answers, scoring communication...<br>This usually takes 20–60 seconds.</p>
+    <div class="progress mt-3" style="height:6px">
+      <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="width:100%"></div>
+    </div>
+  </div>
+</div>
+<script>
+// Poll every 3 seconds
+setInterval(() => {
+  fetch("{% url 'session_status' session.pk %}")
+    .then(r => r.json())
+    .then(d => { if (d.status === 'done' || d.status === 'failed') location.reload(); });
+}, 3000);
+</script>
+
+{% elif session.status == 'failed' %}
+<div class="alert alert-danger">
+  <i class="bi bi-exclamation-triangle me-2"></i>
+  Analysis failed. Please try again or contact support.
+</div>
+
+{% elif report %}
+<!-- ── Report ───────────────────────────────────────────────────────────── -->
+
+<!-- Hero score -->
+<div class="page-hero mb-4">
+  <div class="row align-items-center">
+    <div class="col">
+      <div class="small opacity-75 mb-1">{{ session.domain.name }} · {{ session.get_level_display }} · {{ session.created_at|date:"M d, Y" }}</div>
+      <h3 class="fw-bold mb-1">Interview Analysis Report</h3>
+      <p class="mb-0 opacity-75">Here's how you performed across all three dimensions.</p>
+    </div>
+    <div class="col-auto">
+      <div class="score-ring {{ session.score_badge_class }} bg-white bg-opacity-10">
+        <span>{{ report.overall_score|floatformat:0 }}</span>
+        <span class="label" style="color:white;opacity:.8">Overall</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Score breakdown cards -->
+<div class="row g-3 mb-4">
+  <!-- Technical -->
+  <div class="col-md-4">
+    <div class="card h-100 p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <div class="small text-muted">Technical</div>
+          <div class="fw-bold fs-5">{{ report.tech_score|floatformat:0 }}<small class="text-muted">/100</small></div>
+        </div>
+        <span class="badge bg-primary bg-opacity-10 text-primary badge-score">{{ report.tech_label }}</span>
+      </div>
+      <div class="progress score-bar">
+        <div class="progress-bar {% if report.tech_score >= 75 %}bg-success{% elif report.tech_score >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
+             style="width:{{ report.tech_score }}%"></div>
+      </div>
+      <div class="small text-muted mt-2">AI-graded accuracy against question rubric</div>
+    </div>
+  </div>
+
+  <!-- Confidence -->
+  <div class="col-md-4">
+    <div class="card h-100 p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <div class="small text-muted">Confidence</div>
+          <div class="fw-bold fs-5">{{ report.confidence_score|floatformat:0 }}<small class="text-muted">/100</small></div>
+        </div>
+        <span class="badge bg-warning bg-opacity-10 text-warning badge-score">{{ report.confidence_label }}</span>
+      </div>
+      <div class="progress score-bar">
+        <div class="progress-bar {% if report.confidence_score >= 75 %}bg-success{% elif report.confidence_score >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
+             style="width:{{ report.confidence_score }}%"></div>
+      </div>
+      <div class="small text-muted mt-2">Pace, pauses, and filler word analysis</div>
+    </div>
+  </div>
+
+  <!-- Communication -->
+  <div class="col-md-4">
+    <div class="card h-100 p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <div class="small text-muted">Communication</div>
+          <div class="fw-bold fs-5">{{ report.comm_score|floatformat:0 }}<small class="text-muted">/100</small></div>
+        </div>
+        <span class="badge bg-success bg-opacity-10 text-success badge-score">{{ report.comm_label }}</span>
+      </div>
+      <div class="progress score-bar">
+        <div class="progress-bar {% if report.comm_score >= 75 %}bg-success{% elif report.comm_score >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
+             style="width:{{ report.comm_score }}%"></div>
+      </div>
+      <div class="small text-muted mt-2">Clarity, structure, and vocabulary richness</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <!-- Radar chart -->
+  <div class="col-md-5">
+    <div class="card h-100 p-3">
+      <h6 class="fw-semibold mb-3">Performance Radar</h6>
+      <canvas id="radarChart" height="220"></canvas>
+    </div>
+  </div>
+
+  <!-- Weak areas + suggestions -->
+  <div class="col-md-7">
+    <div class="card h-100 p-3">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-exclamation-circle text-danger me-2"></i>Areas to Improve</h6>
+      {% for area in report.weak_areas %}
+      <div class="feedback-item weak small">{{ area }}</div>
+      {% empty %}
+      <div class="text-muted small">No major weak areas — great job!</div>
+      {% endfor %}
+
+      <h6 class="fw-semibold mt-4 mb-3"><i class="bi bi-lightbulb text-success me-2"></i>Suggestions</h6>
+      {% for s in report.suggestions %}
+      <div class="feedback-item suggest small">{{ s }}</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Per-answer feedback -->
+{% if report.per_answer_feedback %}
+<div class="card mb-4">
+  <div class="card-header bg-white py-3">
+    <h5 class="mb-0 fw-semibold"><i class="bi bi-chat-left-text me-2 text-primary"></i>Answer-by-Answer Breakdown</h5>
+  </div>
+  <div class="card-body">
+    <div class="accordion" id="answersAccordion">
+      {% for item in report.per_answer_feedback %}
+      <div class="accordion-item border mb-2 rounded">
+        <h2 class="accordion-header">
+          <button class="accordion-button {% if not forloop.first %}collapsed{% endif %} rounded"
+                  type="button" data-bs-toggle="collapse"
+                  data-bs-target="#ans{{ forloop.counter }}">
+            <div class="d-flex align-items-center gap-3 w-100">
+              <span class="fw-semibold">Q{{ forloop.counter }}:</span>
+              <span class="flex-grow-1 text-truncate small">{{ item.question }}</span>
+              <div class="d-flex gap-2 me-3 flex-shrink-0">
+                <span class="badge bg-primary bg-opacity-10 text-primary">T: {{ item.tech.score|floatformat:0 }}</span>
+                <span class="badge bg-warning bg-opacity-10 text-warning">C: {{ item.confidence.score|floatformat:0 }}</span>
+                <span class="badge bg-success bg-opacity-10 text-success">L: {{ item.communication.score|floatformat:0 }}</span>
+              </div>
+            </div>
+          </button>
+        </h2>
+        <div id="ans{{ forloop.counter }}"
+             class="accordion-collapse collapse {% if forloop.first %}show{% endif %}">
+          <div class="accordion-body pt-0">
+
+            {% if item.transcript %}
+            <div class="answer-block mb-3">
+              <div class="small text-muted fw-semibold mb-1">YOUR ANSWER</div>
+              <div class="small">{{ item.transcript }}</div>
+            </div>
+            {% endif %}
+
+            <div class="row g-3">
+              <div class="col-md-4">
+                <div class="small fw-semibold text-muted mb-1">TECHNICAL</div>
+                <div class="small text-success">
+                  {% for p in item.tech.correct_points %}<div>✓ {{ p }}</div>{% endfor %}
+                </div>
+                <div class="small text-danger mt-1">
+                  {% for p in item.tech.missing_points %}<div>✗ {{ p }}</div>{% endfor %}
+                </div>
+                <div class="small text-muted mt-1 fst-italic">{{ item.tech.feedback }}</div>
+              </div>
+              <div class="col-md-4">
+                <div class="small fw-semibold text-muted mb-1">CONFIDENCE</div>
+                {% if item.confidence.wpm > 0 %}
+                <div class="small">🎙 {{ item.confidence.wpm }} wpm</div>
+                <div class="small">🔇 Pause ratio: {{ item.confidence.pause_ratio }}</div>
+                {% endif %}
+                <div class="small">💬 Fillers: {{ item.confidence.filler_count }}</div>
+                <div class="small text-muted mt-1 fst-italic">{{ item.confidence.feedback }}</div>
+              </div>
+              <div class="col-md-4">
+                <div class="small fw-semibold text-muted mb-1">COMMUNICATION</div>
+                <div class="small">📝 {{ item.communication.word_count }} words</div>
+                <div class="small">🔗 Structure signals: {{ item.communication.structure_signals }}</div>
+                <div class="small text-muted mt-1 fst-italic">{{ item.communication.feedback }}</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Actions -->
+<div class="d-flex gap-3">
+  <a href="{% url 'start_session' %}" class="btn btn-primary">
+    <i class="bi bi-arrow-repeat me-2"></i>New Interview
+  </a>
+  <a href="{% url 'history' %}" class="btn btn-outline-secondary">
+    <i class="bi bi-clock-history me-2"></i>All History
+  </a>
+</div>
+
+{% block extra_js %}
+<script>
+const ctx = document.getElementById('radarChart');
+new Chart(ctx, {
+  type: 'radar',
+  data: {
+    labels: ['Technical', 'Confidence', 'Communication'],
+    datasets: [{
+      label: 'Your Score',
+      data: [{{ report.tech_score }}, {{ report.confidence_score }}, {{ report.comm_score }}],
+      backgroundColor: 'rgba(108,99,255,0.15)',
+      borderColor: 'rgba(108,99,255,.9)',
+      pointBackgroundColor: 'rgba(108,99,255,1)',
+      borderWidth: 2,
+      pointRadius: 5,
+    }]
+  },
+  options: {
+    responsive: true,
+    scales: {
+      r: {
+        beginAtZero: true,
+        max: 100,
+        ticks: { stepSize: 25 },
+        grid: { color: '#e5e7eb' },
+        pointLabels: { font: { size: 13, weight: '600' } }
+      }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+</script>
+{% endblock %}
+
+{% else %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-hourglass display-4 d-block mb-3 opacity-25"></i>
+  <p>Report not available yet.</p>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,12 @@
+Django==4.2.9
+celery==5.3.6
+redis==5.0.1
+anthropic==0.18.1
+spacy==3.7.2
+django-crispy-forms==2.1
+crispy-bootstrap5==0.7
+Pillow==10.2.0
+python-decouple==3.8
+psycopg2-binary==2.9.9
+django-celery-results==2.5.1
+faster-whisper

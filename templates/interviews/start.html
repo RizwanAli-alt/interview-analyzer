@@ -1,0 +1,112 @@
+{% extends 'base.html' %}
+{% block title %}Start Interview — InterviewAI{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="mb-4">
+      <h3 class="fw-bold">Configure Your Interview</h3>
+      <p class="text-muted">Choose a domain and difficulty to begin.</p>
+    </div>
+
+    <form method="post" action="{% url 'start_session' %}">
+      {% csrf_token %}
+
+      <!-- Domain selection -->
+      <div class="card mb-4">
+        <div class="card-header bg-white py-3">
+          <h5 class="mb-0 fw-semibold"><i class="bi bi-collection me-2 text-primary"></i>Step 1 — Choose Domain</h5>
+        </div>
+        <div class="card-body">
+          <div class="row g-3" id="domainCards">
+            {% for domain in domains %}
+            <div class="col-md-6">
+              <label class="d-block" style="cursor:pointer">
+                <input type="radio" name="domain" value="{{ domain.id }}"
+                       class="domain-radio d-none" required>
+                <div class="domain-card card border-2 h-100 p-3"
+                     style="transition:all .2s; border-color:#e5e7eb !important;">
+                  <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-circle bg-primary bg-opacity-10 p-2"
+                         style="width:44px;height:44px;display:flex;align-items:center;justify-content:center">
+                      <i class="bi bi-{{ domain.icon }} text-primary fs-5"></i>
+                    </div>
+                    <div>
+                      <div class="fw-semibold">{{ domain.name }}</div>
+                      <div class="text-muted small">{{ domain.description }}</div>
+                    </div>
+                  </div>
+                  <div class="mt-2 text-end">
+                    <span class="badge bg-light text-dark">{{ domain.questions.count }} questions</span>
+                  </div>
+                </div>
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Difficulty selection -->
+      <div class="card mb-4">
+        <div class="card-header bg-white py-3">
+          <h5 class="mb-0 fw-semibold"><i class="bi bi-bar-chart me-2 text-primary"></i>Step 2 — Choose Difficulty</h5>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            {% for val, label in form.fields.level.choices %}
+            <div class="col-md-4">
+              <label class="d-block" style="cursor:pointer">
+                <input type="radio" name="level" value="{{ val }}"
+                       class="level-radio d-none" {% if forloop.counter == 2 %}checked{% endif %}>
+                <div class="level-card card border-2 p-3 text-center h-100"
+                     style="transition:all .2s; border-color:{% if forloop.counter == 2 %}var(--primary){% else %}#e5e7eb{% endif %} !important;
+                     {% if forloop.counter == 2 %}background:#f5f3ff{% endif %}">
+                  <div class="fw-bold text-capitalize mb-1">{{ val|title }}</div>
+                  <div class="text-muted small">{{ label|cut:val|cut:" — " }}</div>
+                </div>
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="d-grid">
+        <button type="submit" class="btn btn-primary btn-lg">
+          <i class="bi bi-play-circle me-2"></i>Start Interview
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% block extra_js %}
+<script>
+// Domain card highlight on select
+document.querySelectorAll('.domain-radio').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('.domain-card').forEach(c => {
+      c.style.borderColor = '#e5e7eb';
+      c.style.background = '';
+    });
+    const card = radio.nextElementSibling;
+    card.style.borderColor = 'var(--primary)';
+    card.style.background = '#f5f3ff';
+  });
+});
+
+// Level card highlight
+document.querySelectorAll('.level-radio').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('.level-card').forEach(c => {
+      c.style.borderColor = '#e5e7eb';
+      c.style.background = '';
+    });
+    radio.nextElementSibling.style.borderColor = 'var(--primary)';
+    radio.nextElementSibling.style.background = '#f5f3ff';
+  });
+});
+</script>
+{% endblock %}
+{% endblock %}

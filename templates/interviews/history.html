@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block title %}History — InterviewAI{% endblock %}
+
+{% block content %}
+<h4 class="fw-bold mb-4"><i class="bi bi-clock-history me-2 text-primary"></i>Interview History</h4>
+
+{% if sessions %}
+<div class="row g-3">
+  {% for s in sessions %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-3">
+          <div>
+            <div class="fw-bold">{{ s.domain.name }}</div>
+            <div class="text-muted small">{{ s.get_level_display }} · {{ s.created_at|date:"M d, Y" }}</div>
+          </div>
+          <div class="score-ring {{ s.score_badge_class }}" style="width:60px;height:60px;font-size:1.1rem;border-width:4px">
+            <span>{{ s.report.overall_score|floatformat:0 }}</span>
+          </div>
+        </div>
+        <div class="mb-2">
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Technical</span><span>{{ s.report.tech_score|floatformat:0 }}%</span>
+          </div>
+          <div class="progress" style="height:5px">
+            <div class="progress-bar bg-primary" style="width:{{ s.report.tech_score }}%"></div>
+          </div>
+        </div>
+        <div class="mb-2">
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Confidence</span><span>{{ s.report.confidence_score|floatformat:0 }}%</span>
+          </div>
+          <div class="progress" style="height:5px">
+            <div class="progress-bar bg-warning" style="width:{{ s.report.confidence_score }}%"></div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Communication</span><span>{{ s.report.comm_score|floatformat:0 }}%</span>
+          </div>
+          <div class="progress" style="height:5px">
+            <div class="progress-bar bg-success" style="width:{{ s.report.comm_score }}%"></div>
+          </div>
+        </div>
+        <a href="{% url 'report' s.pk %}" class="btn btn-outline-primary btn-sm w-100">View Full Report</a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-journal-x display-4 d-block mb-3 opacity-25"></i>
+  <p>No completed sessions yet.</p>
+  <a href="{% url 'start_session' %}" class="btn btn-primary">Start Your First Interview</a>
+</div>
+{% endif %}
+{% endblock %}

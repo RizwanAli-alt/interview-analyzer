@@ -1,0 +1,189 @@
+{% extends 'base.html' %}
+{% block title %}Interview Session — InterviewAI{% endblock %}
+
+{% block extra_css %}
+<style>
+  .recorder-btn { width: 80px; height: 80px; border-radius: 50%; font-size: 2rem; transition: all .2s; }
+  .recorder-btn.recording { background: #ef4444 !important; border-color: #ef4444 !important; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)} 50%{box-shadow:0 0 0 12px rgba(239,68,68,0)} }
+  .question-card { border-left: 4px solid var(--primary); }
+  .tab-pane { padding: 1.5rem 0 0; }
+  #audioPreview { width: 100%; margin-top: 1rem; display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+
+    <!-- Progress bar -->
+    <div class="mb-3">
+      <div class="d-flex justify-content-between small text-muted mb-1">
+        <span>Question {{ answered_count|add:1 }} of {{ total_questions }}</span>
+        <span>{{ progress_pct }}% complete</span>
+      </div>
+      <div class="progress" style="height:8px">
+        <div class="progress-bar bg-primary" style="width:{{ progress_pct }}%"></div>
+      </div>
+    </div>
+
+    {% if current_question %}
+    <!-- Question card -->
+    <div class="card question-card mb-4">
+      <div class="card-body p-4">
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <span class="badge bg-primary bg-opacity-10 text-primary">{{ session.domain.name }}</span>
+          <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ session.get_level_display }}</span>
+          <span class="ms-auto text-muted small"><i class="bi bi-question-circle me-1"></i>Question {{ answered_count|add:1 }}</span>
+        </div>
+        <h5 class="fw-semibold mb-0">{{ current_question.text }}</h5>
+      </div>
+    </div>
+
+    <!-- Answer input tabs -->
+    <div class="card mb-4">
+      <div class="card-header bg-white">
+        <ul class="nav nav-tabs card-header-tabs" id="answerTabs">
+          <li class="nav-item">
+            <a class="nav-link active" data-bs-toggle="tab" href="#voiceTab">
+              <i class="bi bi-mic me-1"></i>Voice Answer
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#textTab">
+              <i class="bi bi-keyboard me-1"></i>Type Answer
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="card-body">
+        <div class="tab-content">
+
+          <!-- Voice tab -->
+          <div class="tab-pane fade show active" id="voiceTab">
+            <div class="text-center py-3">
+              <button id="recordBtn" class="btn btn-primary recorder-btn mb-3" type="button">
+                <i class="bi bi-mic-fill"></i>
+              </button>
+              <div id="recordStatus" class="text-muted small">Click to start recording</div>
+              <div id="recordTimer" class="fw-bold text-danger mt-1" style="display:none">⏺ 0:00</div>
+              <audio id="audioPreview" controls></audio>
+            </div>
+
+            <form id="voiceForm" method="post"
+                  action="{% url 'submit_answer' session.pk current_question.pk %}"
+                  enctype="multipart/form-data">
+              {% csrf_token %}
+              <input type="hidden" name="text_input" value="">
+              <input type="file" name="audio_file" id="audioFileInput" accept="audio/*" style="display:none">
+              <div class="d-grid mt-3">
+                <button type="submit" id="submitVoice" class="btn btn-success btn-lg" disabled>
+                  <i class="bi bi-check-circle me-2"></i>Submit Voice Answer
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Text tab -->
+          <div class="tab-pane fade" id="textTab">
+            <form method="post"
+                  action="{% url 'submit_answer' session.pk current_question.pk %}">
+              {% csrf_token %}
+              <textarea name="text_input" class="form-control" rows="7"
+                        placeholder="Type your answer here. Be as detailed as you would in a real interview..."
+                        required></textarea>
+              <input type="hidden" name="audio_file" value="">
+              <div class="d-grid mt-3">
+                <button type="submit" class="btn btn-success btn-lg">
+                  <i class="bi bi-check-circle me-2"></i>Submit Text Answer
+                </button>
+              </div>
+            </form>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    {% else %}
+    <!-- All answered → finish -->
+    <div class="card text-center p-5">
+      <i class="bi bi-check-circle-fill display-3 text-success mb-3"></i>
+      <h4 class="fw-bold">All Questions Answered!</h4>
+      <p class="text-muted">Click below to analyze your performance. This takes 20–60 seconds.</p>
+      <form method="post" action="{% url 'finalize_session' session.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary btn-lg px-5">
+          <i class="bi bi-lightning-charge me-2"></i>Analyze My Interview
+        </button>
+      </form>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+{% block extra_js %}
+<script>
+// ── Voice recorder ────────────────────────────────────────────────────────────
+let mediaRecorder, audioChunks = [], timerInterval, seconds = 0;
+
+const recordBtn   = document.getElementById('recordBtn');
+const recordStatus= document.getElementById('recordStatus');
+const recordTimer = document.getElementById('recordTimer');
+const audioPreview= document.getElementById('audioPreview');
+const audioInput  = document.getElementById('audioFileInput');
+const submitVoice = document.getElementById('submitVoice');
+
+if (recordBtn) {
+  recordBtn.addEventListener('click', async () => {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+      // Start recording
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(audioChunks, { type: 'audio/webm' });
+          const url = URL.createObjectURL(blob);
+          audioPreview.src = url;
+          audioPreview.style.display = 'block';
+
+          // Attach blob as file
+          const file = new File([blob], 'answer.webm', { type: 'audio/webm' });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          audioInput.files = dt.files;
+
+          submitVoice.disabled = false;
+          recordStatus.textContent = 'Recording ready. Preview and submit.';
+          stream.getTracks().forEach(t => t.stop());
+        };
+        mediaRecorder.start();
+        recordBtn.classList.add('recording');
+        recordBtn.innerHTML = '<i class="bi bi-stop-fill"></i>';
+        recordStatus.textContent = 'Recording... Click to stop.';
+        recordTimer.style.display = 'block';
+        seconds = 0;
+        timerInterval = setInterval(() => {
+          seconds++;
+          const m = Math.floor(seconds / 60), s = seconds % 60;
+          recordTimer.textContent = `⏺ ${m}:${s.toString().padStart(2,'0')}`;
+        }, 1000);
+      } catch(e) {
+        recordStatus.textContent = 'Microphone access denied. Use text mode.';
+      }
+    } else {
+      // Stop recording
+      mediaRecorder.stop();
+      clearInterval(timerInterval);
+      recordBtn.classList.remove('recording');
+      recordBtn.innerHTML = '<i class="bi bi-mic-fill"></i>';
+      recordTimer.style.display = 'none';
+    }
+  });
+}
+</script>
+{% endblock %}
+{% endblock %}
