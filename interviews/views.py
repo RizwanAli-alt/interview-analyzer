@@ -1,15 +1,20 @@
 import json
+import random
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
-from django.db.models import Avg
+from django.db.models import Avg, Max
 
 from .models import InterviewSession, Answer, AnalysisReport
 from .forms import StartSessionForm, AnswerForm
 from .tasks import run_analysis
 from questions.models import Question, Domain
+
+
+SESSION_QUESTION_COUNT = 3
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
@@ -20,7 +25,6 @@ def dashboard(request):
         user=request.user
     ).select_related('domain', 'report')
 
-    # Stats for the dashboard cards
     done_sessions = sessions.filter(status='done')
     stats = {
         'total': sessions.count(),
@@ -28,12 +32,16 @@ def dashboard(request):
         'avg_score': done_sessions.aggregate(
             avg=Avg('report__overall_score')
         )['avg'],
+        # FIX: best_score should be Max, not Avg
         'best_score': done_sessions.aggregate(
-            best=Avg('report__overall_score')
+            best=Max('report__overall_score')
         )['best'],
     }
-    if stats['avg_score']:
+
+    if stats['avg_score'] is not None:
         stats['avg_score'] = round(stats['avg_score'], 1)
+    if stats['best_score'] is not None:
+        stats['best_score'] = round(stats['best_score'], 1)
 
     domains = Domain.objects.all()
     return render(request, 'interviews/dashboard.html', {
@@ -54,6 +62,28 @@ def start_session(request):
             session.user = request.user
             session.status = 'in_progress'
             session.save()
+
+            # NEW: snapshot exactly 3 questions for this session
+            qs = list(
+                Question.objects.filter(
+                    domain=session.domain,
+                    level=session.level,
+                    is_active=True,
+                )
+            )
+
+            if len(qs) < SESSION_QUESTION_COUNT:
+                session.delete()
+                messages.error(
+                    request,
+                    f"Not enough active questions for {session.domain} ({session.level}). "
+                    f"Need {SESSION_QUESTION_COUNT}, found {len(qs)}."
+                )
+                return redirect('start_session')
+
+            selected = random.sample(qs, SESSION_QUESTION_COUNT)
+            session.questions.set(selected)
+
             return redirect('session_detail', pk=session.pk)
     else:
         form = StartSessionForm()
@@ -74,16 +104,25 @@ def session_detail(request, pk):
     if session.status == 'done':
         return redirect('report', pk=pk)
 
-    # Get questions for this domain + level
-    questions = list(
-        Question.objects.filter(
-            domain=session.domain,
-            level=session.level,
-            is_active=True
-        )
-    )
+    # FIX: use snapshotted questions (stable + exactly 3)
+    questions = list(session.questions.all())
 
-    # How many have been answered already?
+    # Backward compatibility: if old sessions exist with no snapshot, create one now
+    if not questions:
+        qs = list(
+            Question.objects.filter(
+                domain=session.domain,
+                level=session.level,
+                is_active=True
+            )
+        )
+        if len(qs) >= SESSION_QUESTION_COUNT:
+            selected = random.sample(qs, SESSION_QUESTION_COUNT)
+            session.questions.set(selected)
+            questions = list(session.questions.all())
+        else:
+            questions = qs  # fallback: show whatever exists
+
     answered_ids = set(
         Answer.objects.filter(session=session).values_list('question_id', flat=True)
     )
@@ -110,6 +149,11 @@ def submit_answer(request, session_pk, question_pk):
     session = get_object_or_404(InterviewSession, pk=session_pk, user=request.user)
     question = get_object_or_404(Question, pk=question_pk)
 
+    # Prevent answering a question not assigned to the session
+    if session.questions.exists() and not session.questions.filter(pk=question.pk).exists():
+        messages.error(request, "That question is not part of this interview session.")
+        return redirect('session_detail', pk=session_pk)
+
     # Prevent duplicate answers
     if Answer.objects.filter(session=session, question=question).exists():
         return redirect('session_detail', pk=session_pk)
@@ -122,7 +166,6 @@ def submit_answer(request, session_pk, question_pk):
         order=answered_count + 1,
     )
 
-    # Audio or text
     if 'audio_file' in request.FILES:
         answer.audio_file = request.FILES['audio_file']
     answer.text_input = request.POST.get('text_input', '').strip()
@@ -150,7 +193,6 @@ def finalize_session(request, session_pk):
     session.status = 'analyzing'
     session.save()
 
-    # Fire async Celery task
     run_analysis.delay(session.pk)
 
     messages.success(request, 'Analysis started! Results will appear in a few moments.')

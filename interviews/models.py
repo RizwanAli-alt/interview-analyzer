@@ -17,6 +17,14 @@ class InterviewSession(models.Model):
     level = models.CharField(max_length=10, choices=[
         ('easy', 'Easy'), ('medium', 'Medium'), ('hard', 'Hard')
     ], default='medium')
+
+    # NEW: snapshot assigned questions for this session (exactly 3)
+    questions = models.ManyToManyField(
+        Question,
+        blank=True,
+        related_name="sessions",
+    )
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)

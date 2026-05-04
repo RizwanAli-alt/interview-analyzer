@@ -1,4 +1,6 @@
 from django.core.management.base import BaseCommand
+from django.db import transaction
+
 from questions.models import Domain, Question
 
 
@@ -95,28 +97,29 @@ SEED_DATA = [
 
 
 class Command(BaseCommand):
-    help = 'Seed the database with sample domains and questions'
+    help = "Seed the database with sample domains and questions"
 
+    @transaction.atomic
     def handle(self, *args, **options):
         total_q = 0
+
         for domain_data in SEED_DATA:
-            questions = domain_data.pop('questions')
+            questions = domain_data.pop("questions")
+
             domain, created = Domain.objects.get_or_create(
-                name=domain_data['name'],
-                defaults=domain_data
+                name=domain_data["name"],
+                defaults=domain_data,
             )
-            action = 'Created' if created else 'Found'
-            self.stdout.write(f'{action} domain: {domain.name}')
+            action = "Created" if created else "Found"
+            self.stdout.write(f"{action} domain: {domain.name}")
 
             for q_data in questions:
                 q, q_created = Question.objects.get_or_create(
                     domain=domain,
-                    text=q_data['text'],
-                    defaults=q_data
+                    text=q_data["text"],
+                    defaults=q_data,
                 )
                 if q_created:
                     total_q += 1
 
-        self.stdout.write(self.style.SUCCESS(
-            f'\nDone! {total_q} new questions added.'
-        ))
+        self.stdout.write(self.style.SUCCESS(f"\nDone! {total_q} new questions added."))

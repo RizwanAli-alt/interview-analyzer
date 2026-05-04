@@ -1,72 +1,89 @@
-"""
-transcriber.py
-Converts audio files to text using OpenAI Whisper (runs locally, no API key needed).
-"""
-import os
-import whisper
-from django.conf import settings
+from __future__ import annotations
 
-_model = None
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import List, Tuple, Optional
+
+from faster_whisper import WhisperModel
 
 
-def get_model():
-    """Load Whisper model once and reuse."""
-    global _model
-    if _model is None:
-        model_name = getattr(settings, 'WHISPER_MODEL', 'base')
-        _model = whisper.load_model(model_name)
-    return _model
+@dataclass
+class WordToken:
+    word: str
+    start: float
+    end: float
 
 
-def transcribe(audio_path: str) -> dict:
+@dataclass
+class TranscriptSegment:
+    start: float
+    end: float
+    text: str
+    words: List[WordToken]
+
+
+@lru_cache(maxsize=2)
+def get_model(
+    model_name: str = "base",
+    device: str = "cpu",
+    compute_type: str = "int8",
+) -> WhisperModel:
     """
-    Transcribe an audio file.
+    Lazy-load + cache WhisperModel.
+    compute_type=int8 is a good CPU default.
+    """
+    return WhisperModel(model_name, device=device, compute_type=compute_type)
+
+
+def transcribe_audio(
+    audio_path: str,
+    model_name: str = "base",
+    language: Optional[str] = None,
+) -> Tuple[str, List[TranscriptSegment], dict]:
+    """
     Returns:
-        {
-            'text': str,            # full transcript
-            'segments': list,       # word/segment level timing
-            'language': str,        # detected language
-            'duration': float,      # audio duration in seconds
-            'word_count': int,
-        }
+      full_text: concatenated transcript
+      segments: list of TranscriptSegment including word timestamps (if available)
+      meta: info dict (language, duration, etc.)
     """
-    if not audio_path or not os.path.exists(audio_path):
-        return _empty_result()
+    model = get_model(model_name=model_name)
 
-    try:
-        model = get_model()
-        result = model.transcribe(
-            audio_path,
-            word_timestamps=True,
-            verbose=False
+    segments_iter, info = model.transcribe(
+        audio_path,
+        language=language,
+        word_timestamps=True,
+        vad_filter=True,  # helps on noisy recordings
+    )
+
+    segments: List[TranscriptSegment] = []
+    texts: List[str] = []
+
+    for seg in segments_iter:
+        seg_text = (seg.text or "").strip()
+        if seg_text:
+            texts.append(seg_text)
+
+        words: List[WordToken] = []
+        if getattr(seg, "words", None):
+            for w in seg.words:
+                if not w:
+                    continue
+                words.append(WordToken(word=w.word, start=float(w.start), end=float(w.end)))
+
+        segments.append(
+            TranscriptSegment(
+                start=float(seg.start),
+                end=float(seg.end),
+                text=seg_text,
+                words=words,
+            )
         )
 
-        text = result.get('text', '').strip()
-        segments = result.get('segments', [])
+    full_text = " ".join(texts).strip()
 
-        # Calculate duration from last segment
-        duration = 0.0
-        if segments:
-            duration = segments[-1].get('end', 0.0)
-
-        return {
-            'text': text,
-            'segments': segments,
-            'language': result.get('language', 'en'),
-            'duration': duration,
-            'word_count': len(text.split()) if text else 0,
-        }
-
-    except Exception as e:
-        print(f"[Whisper] Transcription error: {e}")
-        return _empty_result()
-
-
-def _empty_result():
-    return {
-        'text': '',
-        'segments': [],
-        'language': 'en',
-        'duration': 0.0,
-        'word_count': 0,
+    meta = {
+        "language": getattr(info, "language", None),
+        "language_probability": getattr(info, "language_probability", None),
+        "duration": getattr(info, "duration", None),
     }
+    return full_text, segments, meta

@@ -1,4 +1,5 @@
 from django.contrib import admin
+from .admins import *  # noqa: F401,F403
 from .models import Domain, Question
 
 
